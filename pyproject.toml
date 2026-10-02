@@ -1,0 +1,23 @@
+[project]
+name = "ticket-drop"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "redis>=5",
+  "sqlalchemy[asyncio]>=2",
+  "asyncpg",
+  "pyjwt",
+  "prometheus-client",
+  "httpx",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "locust"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.setuptools]
+packages = ["app"]
