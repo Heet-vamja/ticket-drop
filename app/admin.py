@@ -149,15 +149,23 @@ async def stream():
 
 # ---------------- controls ----------------
 
-async def _sim_running() -> int | None:
-    pid = await holds.redis.get(SIM_PID)
-    if not pid:
-        return None
+_sim_pgid: int | None = None  # in-process memory of the sim's process group (survives the sim deleting its Redis key)
+
+
+def _group_alive(pgid: int) -> bool:
     try:
-        os.killpg(int(pid), 0)  # the sim runs in its own process group (parent + shards + bots)
-        return int(pid)
+        os.killpg(pgid, 0)  # the sim runs in its own process group: parent + shards + pool workers + bots
+        return True
     except (ProcessLookupError, ValueError):
-        return None
+        return False
+
+
+async def _sim_running() -> int | None:
+    pgid = _sim_pgid
+    if pgid is None:  # API restarted: fall back to the pid the sim stored
+        stored = await holds.redis.get(SIM_PID)
+        pgid = int(stored) if stored else None
+    return pgid if pgid and _group_alive(pgid) else None
 
 
 @router.post("/drop/open")
@@ -220,6 +228,8 @@ async def simulate(req: SimRequest):
         sys.executable, "-m", "app.sim", str(req.humans), str(req.bots),
         stdout=open("sim.log", "ab"), stderr=asyncio.subprocess.STDOUT, start_new_session=True,
     )
+    global _sim_pgid
+    _sim_pgid = proc.pid  # start_new_session=True makes the child its own group leader (pgid == pid)
     await holds.redis.set(SIM_PID, proc.pid)
     return {"ok": True, "pid": proc.pid}
 

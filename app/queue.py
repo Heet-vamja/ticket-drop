@@ -34,6 +34,13 @@ async def open_queue():
     return {"window_seconds": ENTRY_WINDOW_SECONDS}
 
 
+def poll_interval(ahead: int) -> float:
+    """Backpressure on clients, by distance from the front: people about to be admitted check every ~2s (so a
+    freed slot isn't left idle), people deep in the queue check rarely. 10k waiters all polling every 2s would be
+    5k req/s of pure noise."""
+    return min(30.0, max(2.0, ahead / 50))
+
+
 async def position_of(user: str) -> dict:
     rank = await redis.zrank(QUEUE, user)
     if rank is None:
@@ -44,12 +51,14 @@ async def position_of(user: str) -> dict:
     if await booking.sold_out():
         raise HTTPException(410, "sold out")  # don't keep 100k people waiting for seats that no longer exist
     rate = admission.stats["rate"]  # users/second the gate is actually admitting right now
+    total = await redis.zcard(QUEUE)
     return {
         "status": "queued",
         "user": user,
         "position": rank + 1,
         "ahead": rank,
-        "total": await redis.zcard(QUEUE),
+        "total": total,
+        "poll_after": round(poll_interval(rank), 1),
         "eta_seconds": round(rank / rate) if rate > 0.05 else None,  # None = gate is full, can't estimate
     }
 
@@ -101,7 +110,7 @@ async def events(user: str):
             yield f"data: {json.dumps(data)}\n\n"
             if data["status"] == "admitted":
                 return
-            await asyncio.sleep(2 + random.random())  # jitter so connections don't pulse in sync
+            await asyncio.sleep(poll_interval(data["ahead"]) * (0.8 + 0.4 * random.random()))  # scaled + jittered so connections don't pulse in sync
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 

@@ -58,24 +58,42 @@ def _ip(i: int) -> str:
     return f"10.{(i >> 16) & 255}.{(i >> 8) & 255}.{i & 255}"
 
 
+async def send(client: httpx.AsyncClient, method: str, url: str, **kw) -> httpx.Response:
+    """Retry transient transport errors (e.g. the server closing an idle keep-alive connection). Every call a human
+    makes is safe to repeat: challenge/position are reads, join is NX, hold is NX, confirm is idempotent."""
+    for attempt in range(3):
+        try:
+            return await client.request(method, url, **kw)
+        except httpx.TransportError:
+            if attempt == 2:
+                raise
+            await asyncio.sleep(0.2 * (attempt + 1))
+    raise AssertionError("unreachable")
+
+
 async def human(i: int, client: httpx.AsyncClient, pool: ProcessPoolExecutor, spread: float, st: Stats) -> None:
     user, headers = f"h{i}", {"X-Forwarded-For": _ip(i + 1)}
     loop = asyncio.get_running_loop()
     try:
         await asyncio.sleep(random.random() * spread)  # everybody clicks "join" within the same few seconds
-        ch = (await client.get("/queue/challenge", params={"user": user}, headers=headers)).json()
+        ch = (await send(client, "GET", "/queue/challenge", params={"user": user}, headers=headers)).json()
         solution = await loop.run_in_executor(pool, solve, ch["nonce"], user, ch["bits"])
         st.inc("pow_solved")
-        r = await client.post("/queue/join", params={"user": user, "solution": solution}, headers=headers)
+        r = await send(client, "POST", "/queue/join", params={"user": user, "solution": solution}, headers=headers)
         if r.status_code == 410:
             st.inc("sold_out")
             return
         r.raise_for_status()
         st.inc("joined")
         token = None
+        wait = r.json().get("poll_after", 3.0)
         while not stop.is_set():
-            await asyncio.sleep(2 + random.random() * 3)  # polling with jitter, like the SSE fallback
-            r = await client.get("/queue/position", params={"user": user}, headers=headers)
+            try:  # obey the server's backpressure hint, with jitter; wake immediately on stop
+                await asyncio.wait_for(stop.wait(), timeout=wait * (0.8 + 0.4 * random.random()))
+                return
+            except asyncio.TimeoutError:
+                pass
+            r = await send(client, "GET", "/queue/position", params={"user": user}, headers=headers)
             if r.status_code == 404:
                 st.inc("gave_up")
                 return
@@ -85,12 +103,14 @@ async def human(i: int, client: httpx.AsyncClient, pool: ProcessPoolExecutor, sp
             if r.status_code == 200 and r.json()["status"] == "admitted":
                 token = r.json()["token"]
                 break
+            if r.status_code == 200:
+                wait = r.json().get("poll_after", wait)
         if not token:
             return
         st.inc("admitted")
         auth = {**headers, "Authorization": f"Bearer {token}"}
         for _ in range(8):  # pick a seat; popular front seats are contended
-            r = await client.get("/shop/seats", headers=auth)
+            r = await send(client, "GET", "/shop/seats", headers=auth)
             if r.status_code != 200:
                 st.inc("errors")
                 return
@@ -99,14 +119,14 @@ async def human(i: int, client: httpx.AsyncClient, pool: ProcessPoolExecutor, sp
                 st.inc("sold_out")
                 return
             seat = random.choice(free[: max(5, len(free) // 3)])  # bias toward the front third
-            h = await client.post(f"/shop/hold/{seat}", headers=auth)
+            h = await send(client, "POST", f"/shop/hold/{seat}", headers=auth)
             if h.status_code == 409:
                 continue
             if h.status_code != 200:
                 st.inc("errors")
                 return
             await asyncio.sleep(1 + random.random() * 4)  # entering payment details
-            c = await client.post(f"/shop/confirm/{seat}", headers=auth)
+            c = await send(client, "POST", f"/shop/confirm/{seat}", headers=auth)
             st.inc("bought" if c.status_code == 200 else "errors")
             return
         st.inc("gave_up")

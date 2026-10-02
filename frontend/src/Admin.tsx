@@ -106,6 +106,12 @@ export default function Admin() {
     return ((last.v - first.v) / Math.max(last.t - first.t, 1)) * 60
   }, [snap])
 
+  const stampede = async () => {
+    // Fresh run: if the show already sold out (or a previous run left state behind), reset first.
+    if (snap && (snap.seats.available === 0 || snap.seats.sold > 0 || (snap.queued ?? 0) > 0)) await call('reset')
+    await call('simulate', { humans: 10000, bots: 1000 })
+  }
+
   if (!snap) {
     return <main className="admin"><p className="muted">{conn === 'lost' ? 'Cannot reach the API (is it running, and is the admin key right?)' : 'Connecting…'}</p>
       <input value={key} onChange={(e) => setKey(e.target.value)} aria-label="Admin key" /></main>
@@ -253,6 +259,11 @@ export default function Admin() {
 
         <Panel title="Controls">
           <div className="controls">
+            <button className="launch" onClick={stampede} disabled={sim.running === '1'}>
+              {sim.running === '1' ? 'Stampede in progress…' : 'Launch 10,000-user stampede'}
+            </button>
+            <span className="muted small">resets first if there is leftover state; 10,000 humans + 1,000 bots</span>
+            <hr />
             <div className="row">
               <button onClick={() => call('drop/open')}>Open the drop</button>
               <button className="danger" onClick={() => call('reset')}>Reset everything</button>

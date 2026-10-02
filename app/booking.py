@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +21,7 @@ async def reset():
     if keys:
         await holds.redis.delete(*keys)
     await holds.redis.delete(holds.DEADLINES, SOLD_SET)
+    _seat_cache["at"] = 0.0
     return {"ok": True}
 
 
@@ -84,8 +87,22 @@ async def stats():
     return {"sales": total, "distinct_seats": distinct, "oversold": total - distinct}
 
 
+_seat_cache: dict = {"at": 0.0, "value": ""}
+SEAT_CACHE_SECONDS = 1.0
+
+
 async def seat_states() -> str:
-    """One char per seat: 'a' available, 'h' held, 's' sold. Sold seats keep a persistent key (see confirm)."""
+    """One char per seat: 'a' available, 'h' held, 's' sold. Sold seats keep a persistent key (see confirm).
+    Cached for 1s: thousands of shoppers refreshing the map shouldn't each cost an MGET + a DB query. Holds stay
+    atomic, so a stale map can only cause a harmless 409 'seat taken'."""
+    if time.time() - _seat_cache["at"] < SEAT_CACHE_SECONDS and _seat_cache["value"]:
+        return _seat_cache["value"]
+    value = await _compute_seat_states()
+    _seat_cache.update(at=time.time(), value=value)
+    return value
+
+
+async def _compute_seat_states() -> str:
     keys = [holds.seat_key(EVENT_ID, i) for i in range(TOTAL_SEATS)]
     values = await holds.redis.mget(keys)
     async with Session() as s:
