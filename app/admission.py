@@ -9,7 +9,7 @@ import time
 
 import jwt
 
-from . import metrics
+from . import booking, metrics
 from .config import (
     ADMIT_INTERVAL_SECONDS,
     ADMISSION_TTL_SECONDS,
@@ -22,6 +22,7 @@ from .config import (
 from .holds import redis
 
 QUEUE = "queue:z"
+_admit_log = {"t": 0.0, "n": 0}
 ADMITTED = "admitted:z"  # sorted set: member user, score = token expiry (epoch)
 
 
@@ -50,6 +51,8 @@ def adapt() -> None:
 
 
 async def admit_once() -> list[str]:
+    if await booking.sold_out():
+        return []
     now = time.time()
     await redis.zremrangebyscore(ADMITTED, 0, now)  # expired tokens free their slot -> next person gets in
     active = await redis.zcard(ADMITTED)
@@ -66,7 +69,10 @@ async def admit_once() -> list[str]:
         pipe.zadd(ADMITTED, {user: now + ADMISSION_TTL_SECONDS})
     pipe.hincrby(metrics.COUNTERS, "admitted", len(users))
     await pipe.execute()
-    await metrics.log_event("admit", f"admitted {len(users)} users (active {active + len(users)}/{GATE['max_active']})")
+    _admit_log["n"] += len(users)
+    if now - _admit_log["t"] >= 3:  # coalesce: one ticker line per few seconds, not one per tick
+        await metrics.log_event("admit", f"admitted {_admit_log['n']} users in {now - _admit_log['t']:.0f}s (active {active + len(users)}/{GATE['max_active']})")
+        _admit_log.update(t=now, n=0)
     return users
 
 

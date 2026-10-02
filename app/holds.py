@@ -5,7 +5,8 @@ import redis.asyncio as aioredis
 
 from .config import HOLD_TTL_SECONDS
 
-redis = aioredis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0"), decode_responses=True, max_connections=1000)
+redis = aioredis.from_url(os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0"), decode_responses=True, max_connections=1000,
+    socket_timeout=1.0, socket_connect_timeout=1.0)
 
 DEADLINES = "holds:deadlines"  # sorted set: member "event:seat", score = deadline (epoch seconds)
 

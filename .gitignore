@@ -3,3 +3,7 @@ __pycache__/
 *.egg-info/
 node_modules/
 .td.pid
+sim.log
+server.log
+.vite.pid
+frontend/dist/

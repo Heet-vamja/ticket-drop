@@ -3,6 +3,7 @@
 Per-second request buckets feed the admin dashboard; the booking-latency EWMA drives the adaptive admission gate.
 Cross-process facts (events log, throttle counters) live in Redis so the sim subprocess and API agree.
 """
+import asyncio
 import json
 import time
 from collections import Counter, deque
@@ -72,3 +73,25 @@ async def log_event(kind: str, message: str) -> None:
     pipe.lpush(EVENT_LOG, entry)
     pipe.ltrim(EVENT_LOG, 0, 99)
     await pipe.execute()
+
+
+loop_lag_ms = 0.0
+
+
+async def monitor_loop_lag() -> None:
+    """How late the event loop wakes us: a direct, honest measure of how overloaded the API process is."""
+    global loop_lag_ms
+    while True:
+        started = time.perf_counter()
+        await asyncio.sleep(0.1)
+        lag = max(0.0, (time.perf_counter() - started - 0.1) * 1000)
+        loop_lag_ms = 0.5 * loop_lag_ms + 0.5 * lag
+
+
+degraded_total = 0
+
+
+async def count_degraded() -> None:
+    global degraded_total
+    degraded_total += 1
+    _buckets.setdefault(int(time.time()), Counter())["degraded"] += 1

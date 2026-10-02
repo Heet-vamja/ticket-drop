@@ -9,6 +9,7 @@ from .db import Sale, Session, reset_sales
 router = APIRouter(prefix="/v2")
 EVENT_ID = 1
 GRACE_SECONDS = 30
+SOLD_SET = "sold:seats"
 
 
 @router.post("/reset")
@@ -17,7 +18,7 @@ async def reset():
     keys = [k async for k in holds.redis.scan_iter("seat:*")]
     if keys:
         await holds.redis.delete(*keys)
-    await holds.redis.delete(holds.DEADLINES)
+    await holds.redis.delete(holds.DEADLINES, SOLD_SET)
     return {"ok": True}
 
 
@@ -56,6 +57,7 @@ async def confirm(seat_id: int, user: str):
                 return {"status": "sold"}
             raise HTTPException(409, "seat already sold")
     # SOLD is terminal: keep the key so nobody can re-hold, but drop the expiry.
+    await holds.redis.sadd(SOLD_SET, seat_id)
     await holds.redis.persist(holds.seat_key(EVENT_ID, seat_id))
     await holds.redis.zrem(holds.DEADLINES, f"{EVENT_ID}:{seat_id}")
     return {"status": "sold"}
@@ -89,3 +91,7 @@ async def seat_states() -> str:
     async with Session() as s:
         sold = set((await s.scalars(select(Sale.seat_id).where(Sale.event_id == EVENT_ID))).all())
     return "".join("s" if i in sold else ("h" if v is not None else "a") for i, v in enumerate(values))
+
+
+async def sold_out() -> bool:
+    return await holds.redis.scard(SOLD_SET) >= TOTAL_SEATS

@@ -8,10 +8,11 @@ import json
 import random
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from . import antibot, metrics
+from . import antibot, booking, metrics
+from .auth import require_admin
 from .config import ADMIT_INTERVAL_SECONDS, ENTRY_WINDOW_SECONDS, GATE
 from .holds import redis
 
@@ -25,7 +26,7 @@ async def _window_end() -> float | None:
     return float(opened) + ENTRY_WINDOW_SECONDS if opened else None
 
 
-@router.post("/open")
+@router.post("/open", dependencies=[Depends(require_admin)])
 async def open_queue():
     """Start the drop: resets the queue and starts the randomized entry window."""
     await redis.delete(QUEUE)
@@ -40,6 +41,8 @@ async def position_of(user: str) -> dict:
         if token:
             return {"status": "admitted", "user": user, "token": token}
         raise HTTPException(404, "not in queue")
+    if await booking.sold_out():
+        raise HTTPException(410, "sold out")  # don't keep 100k people waiting for seats that no longer exist
     rate = GATE["batch"] / ADMIT_INTERVAL_SECONDS  # users admitted per second (live, adaptive)
     return {
         "status": "queued",
@@ -52,6 +55,8 @@ async def position_of(user: str) -> dict:
 
 
 async def join(user: str):
+    if await booking.sold_out():
+        raise HTTPException(410, "sold out")  # load shedding: shed cheaply, no queue entry
     end = await _window_end()
     if end is None:
         raise HTTPException(409, "drop has not opened")
@@ -90,8 +95,8 @@ async def events(user: str):
         while True:
             try:
                 data = await position_of(user)
-            except HTTPException:
-                yield "event: gone\ndata: {}\n\n"
+            except HTTPException as e:
+                yield f"event: {'soldout' if e.status_code == 410 else 'gone'}\ndata: {{}}\n\n"
                 return
             yield f"data: {json.dumps(data)}\n\n"
             if data["status"] == "admitted":

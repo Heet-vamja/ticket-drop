@@ -62,6 +62,7 @@ async def confirm(request: Request, seat_id: int, authorization: str | None = He
     await antibot.throttle(request, account=user)  # paying after the admission window is fine if you hold the seat
     result = await booking.confirm(seat_id, user)
     await metrics.incr("sold")
+    await admission.release_slot(user)  # done shopping: free the gate slot for the next person in the queue
     await metrics.log_event("sold", f"{user} booked seat #{seat_id}")
     return result
 

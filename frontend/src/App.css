@@ -1,35 +1,20 @@
-.waiting-room {
-  max-width: 28rem;
-  margin: 4rem auto;
-  padding: 0 1rem;
-  text-align: center;
-}
-
-.waiting-room form {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.waiting-room input {
-  padding: 0.5rem 0.75rem;
-  font-size: 1rem;
-}
-
-.waiting-room button {
-  padding: 0.5rem 1rem;
-  font-size: 1rem;
-  cursor: pointer;
-}
-
-.position {
-  font-size: 4rem;
-  font-weight: 700;
-  margin: 1rem 0 0;
-}
-
-.hint {
-  opacity: 0.6;
-  font-size: 0.9rem;
-}
+.shop { max-width: 30rem; margin: 3rem auto; padding: 0 1rem; text-align: center; }
+.shop.wide { max-width: 46rem; }
+.shop h1 { font-size: 1.6rem; margin-bottom: 1.25rem; }
+.shop form { display: flex; gap: .5rem; justify-content: center; flex-wrap: wrap; }
+.shop input { padding: .6rem .8rem; font-size: 1rem; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+.shop button { padding: .6rem 1rem; font-size: 1rem; cursor: pointer; border-radius: 8px; border: 0; background: var(--accent); color: #06101f; font-weight: 600; }
+.shop button:disabled { opacity: .6; cursor: default; }
+.shop button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+.shop .position { font-size: 4.5rem; font-weight: 800; margin: 1rem 0 0; font-variant-numeric: tabular-nums; }
+.shop .hint { color: var(--muted); font-size: .9rem; }
+.shop .err { color: var(--bad); width: 100%; }
+.shop .ok { color: var(--good); }
+.shop .legend { display: flex; gap: .5rem; justify-content: center; align-items: center; color: var(--muted); font-size: .85rem; margin: .5rem 0 1rem; }
+.shop .chip { display: inline-block; width: .8rem; height: .8rem; border-radius: 3px; margin-left: .6rem; }
+.shop .seatmap { display: grid; grid-template-columns: repeat(25, 1fr); gap: 3px; }
+.shop .seat { aspect-ratio: 1; padding: 0; border-radius: 3px; min-width: 0; }
+.shop .free { background: var(--free) !important; } .shop .held { background: var(--held) !important; }
+.shop .sold { background: var(--sold) !important; opacity: .5; } .shop .mine { background: var(--mine) !important; }
+.shop .seat.free:hover { outline: 2px solid var(--good); }
+.shop .holdrow { display: flex; gap: .75rem; align-items: center; justify-content: center; margin-top: 1rem; flex-wrap: wrap; }

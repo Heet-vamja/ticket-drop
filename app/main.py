@@ -2,17 +2,20 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 
+import redis.exceptions
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from . import admission, booking, expiry, metrics, naive, queue, shop
+from . import admin, admission, booking, expiry, metrics, naive, queue, shop
 from .db import init_db
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await init_db()
-    tasks = [asyncio.create_task(expiry.run()), asyncio.create_task(admission.run())]
+    tasks = [asyncio.create_task(expiry.run()), asyncio.create_task(admission.run()),
+             asyncio.create_task(metrics.monitor_loop_lag())]
     yield
     for t in tasks:
         t.cancel()
@@ -48,6 +51,14 @@ async def telemetry(request: Request, call_next):
     return response
 
 
+@app.exception_handler(redis.exceptions.RedisError)
+async def redis_down(_: Request, __: redis.exceptions.RedisError):
+    """Fail closed: if Redis (holds/queue) is unreachable we refuse new work rather than guess.
+    Sold seats stay safe because the Postgres unique constraint is the final authority."""
+    await metrics.count_degraded()
+    return JSONResponse({"detail": "temporarily unavailable, please retry"}, status_code=503, headers={"Retry-After": "2"})
+
+
 @app.get("/metrics")
 async def prometheus():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -57,3 +68,4 @@ app.include_router(naive.router)
 app.include_router(booking.router)
 app.include_router(queue.router)
 app.include_router(shop.router)
+app.include_router(admin.router)
