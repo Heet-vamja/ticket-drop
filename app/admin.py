@@ -125,7 +125,7 @@ async def build_snapshot() -> dict:
     snap["rps"] = metrics.rps_series(60)
     snap["latency"] = metrics.latency_stats(10)
     snap["api"] = {"loop_lag_ms": round(metrics.loop_lag_ms, 1), "pid": os.getpid()}
-    snap["gate"] = {**GATE, "ewma_ms": round(metrics.ewma_ms, 1), "target_ms": 150}
+    snap["gate"] = {**GATE, "measured_rate": round(admission.stats["rate"], 1), "ewma_ms": round(metrics.ewma_ms, 1), "target_ms": 150}
     return snap
 
 

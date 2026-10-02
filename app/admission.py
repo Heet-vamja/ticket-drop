@@ -23,6 +23,7 @@ from .holds import redis
 
 QUEUE = "queue:z"
 _admit_log = {"t": 0.0, "n": 0}
+stats = {"rate": 0.0}  # measured users admitted per second (EWMA), as opposed to GATE["batch"], the target
 ADMITTED = "admitted:z"  # sorted set: member user, score = token expiry (epoch)
 
 
@@ -84,7 +85,8 @@ async def run() -> None:
     while True:
         try:
             adapt()
-            await admit_once()
+            admitted = await admit_once()
+            stats["rate"] = 0.7 * stats["rate"] + 0.3 * (len(admitted) / ADMIT_INTERVAL_SECONDS)
         except Exception:  # Redis blip: skip this tick; fail closed (nobody new gets in)
             pass
         await asyncio.sleep(ADMIT_INTERVAL_SECONDS)

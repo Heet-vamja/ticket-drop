@@ -11,9 +11,9 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from . import antibot, booking, metrics
+from . import admission, antibot, booking, metrics
 from .auth import require_admin
-from .config import ADMIT_INTERVAL_SECONDS, ENTRY_WINDOW_SECONDS, GATE
+from .config import ENTRY_WINDOW_SECONDS
 from .holds import redis
 
 router = APIRouter(prefix="/queue")
@@ -43,14 +43,14 @@ async def position_of(user: str) -> dict:
         raise HTTPException(404, "not in queue")
     if await booking.sold_out():
         raise HTTPException(410, "sold out")  # don't keep 100k people waiting for seats that no longer exist
-    rate = GATE["batch"] / ADMIT_INTERVAL_SECONDS  # users admitted per second (live, adaptive)
+    rate = admission.stats["rate"]  # users/second the gate is actually admitting right now
     return {
         "status": "queued",
         "user": user,
         "position": rank + 1,
         "ahead": rank,
         "total": await redis.zcard(QUEUE),
-        "eta_seconds": round(rank / rate) if rate else None,
+        "eta_seconds": round(rank / rate) if rate > 0.05 else None,  # None = gate is full, can't estimate
     }
 
 

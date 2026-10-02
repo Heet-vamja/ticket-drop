@@ -43,3 +43,5 @@
 .admin button.danger { background: var(--bad); color: #20060a; } .admin button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); } .admin button:disabled { opacity: .5; cursor: default; }
 @media (max-width: 900px) { .kpis, .grid4 { grid-template-columns: 1fr 1fr; } .grid2 { grid-template-columns: 1fr; } .radar { grid-template-columns: 1fr 1fr; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+.note { color: var(--muted); font-size: .7rem; margin: .5rem 0 0; }

@@ -13,7 +13,7 @@ type Snap = {
   rps: Row[]
   latency: { p50: number; p99: number; ewma: number; n: number }
   api: { loop_lag_ms: number; pid: number }
-  gate: { batch: number; max_active: number; adaptive: boolean; ewma_ms: number; target_ms: number }
+  gate: { batch: number; measured_rate: number; max_active: number; adaptive: boolean; ewma_ms: number; target_ms: number }
 }
 type Hist = Record<'ops' | 'rtt' | 'p99' | 'lag' | 'queued' | 'sold' | 'batch' | 'throttle' | 'tps', number[]>
 const KEEP = 90
@@ -83,7 +83,7 @@ export default function Admin() {
         ops: push(h.ops, s.redis.ops_per_sec ?? 0), rtt: push(h.rtt, s.redis.rtt_ms ?? 0),
         p99: push(h.p99, s.latency.p99), lag: push(h.lag, s.api.loop_lag_ms),
         queued: push(h.queued, s.queued ?? 0), sold: push(h.sold, s.seats.sold),
-        batch: push(h.batch, s.gate.batch), throttle: push(h.throttle, throttleRate), tps: push(h.tps, s.pg.tps ?? 0),
+        batch: push(h.batch, s.gate.measured_rate), throttle: push(h.throttle, throttleRate), tps: push(h.tps, s.pg.tps ?? 0),
       }))
     }
     return () => es.close()
@@ -118,7 +118,6 @@ export default function Admin() {
   const latest = snap.rps[snap.rps.length - 1]
   const degraded = snap.rps.slice(-5).reduce((a, r) => a + (r.degraded || 0), 0)
   const soldOutEta = sellRate > 0.5 ? Math.ceil(snap.seats.available / (sellRate / 60)) : null
-  const botsBlocked = Number(sim.bot_throttled || 0) + Number(sim.bot_rejected || 0)
   const funnel = [
     { label: 'Joined queue', v: c.joined ?? 0, color: '#3ddc97' },
     { label: 'Admitted', v: c.admitted ?? 0, color: '#5b9cff' },
@@ -152,7 +151,7 @@ export default function Admin() {
 
       <div className="kpis">
         <div className="kpi"><span>In queue</span><b>{n(snap.queued)}</b><Spark data={hist.queued} color="#3ddc97" /></div>
-        <div className="kpi"><span>Admitted &amp; shopping</span><b>{n(snap.active)}<small> / {snap.gate.max_active}</small></b>
+        <div className="kpi"><span>Admitted (holding a slot)</span><b>{n(snap.active)}<small> / {snap.gate.max_active}</small></b>
           <div className="bar"><i style={{ width: `${Math.min(100, ((snap.active ?? 0) / snap.gate.max_active) * 100)}%` }} /></div></div>
         <div className="kpi"><span>Seats held right now</span><b className="held">{snap.seats.held}</b><small className="muted">holds expire after 5 min</small></div>
         <div className="kpi sold">
@@ -191,6 +190,7 @@ export default function Admin() {
             <Stat label="Memory" value={snap.redis.memory_mb ?? '—'} unit="MB" />
             <Stat label="Keys" value={n(snap.redis.keys)} />
           </div>
+          <p className="note">idle baseline ≈ 25–30 ops/s: the app's background loops plus this dashboard (~6)</p>
         </Panel>
         <Panel title="Postgres" status={snap.pg.up ? 'ok' : 'bad'}>
           <div className="big"><b>{snap.pg.tps ?? '—'}</b> tx/s</div>
@@ -200,6 +200,7 @@ export default function Admin() {
             <Stat label="Active" value={n(snap.pg.active)} />
             <Stat label="Rows in sales" value={n(snap.pg.sales)} />
           </div>
+          <p className="note">idle baseline ≈ 1 tx/s: this dashboard's own queries</p>
         </Panel>
         <Panel title="API process" status={snap.api.loop_lag_ms > 100 ? 'bad' : snap.api.loop_lag_ms > 25 ? 'warn' : 'ok'}>
           <div className="big"><b>{snap.latency.p99}</b> ms p99 booking</div>
@@ -211,9 +212,11 @@ export default function Admin() {
           </div>
         </Panel>
         <Panel title="Admission gate" status={snap.gate.ewma_ms > snap.gate.target_ms ? 'warn' : 'ok'}>
-          <div className="big"><b>{snap.gate.batch}</b> admitted / sec</div>
-          <Spark data={hist.batch} color="#3ddc97" min={0} max={100} />
+          <div className="big"><b>{snap.gate.measured_rate}</b> admitted / sec (measured)</div>
+          <Spark data={hist.batch} color="#3ddc97" />
           <div className="stats">
+            <Stat label="Target batch" value={snap.gate.batch} unit="/s" />
+            <Stat label="Free slots" value={Math.max(0, snap.gate.max_active - (snap.active ?? 0))} />
             <Stat label="Booking EWMA" value={snap.gate.ewma_ms} unit={`/${snap.gate.target_ms}ms`} />
             <Stat label="Mode" value={snap.gate.adaptive ? 'adaptive' : 'manual'} />
           </div>
@@ -235,12 +238,12 @@ export default function Admin() {
       </div>
 
       <div className="grid2">
-        <Panel title="Bot radar">
+<Panel title="Bot radar">
           <div className="radar">
-            <div><b className="good">{n(Number(sim.admitted || 0))}</b><span>humans admitted</span></div>
-            <div><b className="good">{n(Number(sim.bought || 0))}</b><span>humans booked</span></div>
-            <div><b className="bad">{n(botsBlocked)}</b><span>bot requests blocked</span></div>
-            <div><b className="bad">{n(Number(sim.bot_other || 0))}</b><span>bot requests that got through</span></div>
+            <div><b className="good">{n(c.admitted ?? 0)}</b><span>admitted (server count)</span></div>
+            <div><b className="good">{n(c.sold ?? 0)}</b><span>booked (server count)</span></div>
+            <div><b className="bad">{n((c.throttled ?? 0) + (c.rejected ?? 0))}</b><span>blocked at the door (server: 429 + failed PoW)</span></div>
+            <div><b className="bad">{sim.humans_total ? n(Number(sim.bot_other || 0)) : '—'}</b><span>bot requests that got through (reported by the simulator)</span></div>
           </div>
           <p className="muted small">
             {sim.running === '1' ? `Simulation running: ${sim.humans_total} humans, ${sim.bots_total} bots, ${sim.pow_solved} proofs-of-work solved, ${sim.joined} joined.`
