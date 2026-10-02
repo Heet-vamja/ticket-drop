@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from . import booking, expiry, naive
+from . import booking, expiry, naive, queue
 from .db import init_db
 
 
@@ -18,3 +18,4 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="ticket-drop", lifespan=lifespan)
 app.include_router(naive.router)
 app.include_router(booking.router)
+app.include_router(queue.router)

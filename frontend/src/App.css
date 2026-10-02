@@ -1,0 +1,35 @@
+.waiting-room {
+  max-width: 28rem;
+  margin: 4rem auto;
+  padding: 0 1rem;
+  text-align: center;
+}
+
+.waiting-room form {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.waiting-room input {
+  padding: 0.5rem 0.75rem;
+  font-size: 1rem;
+}
+
+.waiting-room button {
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.position {
+  font-size: 4rem;
+  font-weight: 700;
+  margin: 1rem 0 0;
+}
+
+.hint {
+  opacity: 0.6;
+  font-size: 0.9rem;
+}
