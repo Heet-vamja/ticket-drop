@@ -1,8 +1,8 @@
 """Token-guarded booking API used by the React app. Identity comes from the admission JWT, never the query."""
 import jwt
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 
-from . import admission, booking, holds, metrics
+from . import admission, antibot, booking, holds, metrics
 from .config import MAX_TICKETS_PER_USER
 
 router = APIRouter(prefix="/shop")
@@ -36,14 +36,16 @@ async def tickets_in_play(user: str) -> int:
 
 
 @router.get("/seats")
-async def seats(authorization: str | None = Header(None)):
-    _user_from(authorization, verify_exp=False)
+async def seats(request: Request, authorization: str | None = Header(None)):
+    user = _user_from(authorization, verify_exp=False)
+    await antibot.throttle(request, account=user)
     return {"seats": await booking.seat_states()}
 
 
 @router.post("/hold/{seat_id}")
-async def hold(seat_id: int, authorization: str | None = Header(None)):
+async def hold(request: Request, seat_id: int, authorization: str | None = Header(None)):
     user = _user_from(authorization, verify_exp=True)
+    await antibot.throttle(request, account=user)
     if await tickets_in_play(user) >= MAX_TICKETS_PER_USER:
         await metrics.incr("capped")
         raise HTTPException(403, f"max {MAX_TICKETS_PER_USER} tickets per person")
@@ -55,8 +57,9 @@ async def hold(seat_id: int, authorization: str | None = Header(None)):
 
 
 @router.post("/confirm/{seat_id}")
-async def confirm(seat_id: int, authorization: str | None = Header(None)):
-    user = _user_from(authorization, verify_exp=False)  # paying after the admission window is fine if you hold the seat
+async def confirm(request: Request, seat_id: int, authorization: str | None = Header(None)):
+    user = _user_from(authorization, verify_exp=False)
+    await antibot.throttle(request, account=user)  # paying after the admission window is fine if you hold the seat
     result = await booking.confirm(seat_id, user)
     await metrics.incr("sold")
     await metrics.log_event("sold", f"{user} booked seat #{seat_id}")

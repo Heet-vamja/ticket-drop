@@ -8,9 +8,10 @@ import json
 import random
 import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from . import antibot, metrics
 from .config import ADMIT_INTERVAL_SECONDS, ENTRY_WINDOW_SECONDS, GATE
 from .holds import redis
 
@@ -50,7 +51,6 @@ async def position_of(user: str) -> dict:
     }
 
 
-@router.post("/join")
 async def join(user: str):
     end = await _window_end()
     if end is None:
@@ -61,8 +61,24 @@ async def join(user: str):
     return await position_of(user)
 
 
+@router.get("/challenge")
+async def challenge(request: Request, user: str):
+    await antibot.throttle(request)
+    return await antibot.issue_challenge(user)
+
+
+@router.post("/join")
+async def join_endpoint(request: Request, user: str, solution: str | None = None):
+    await antibot.throttle(request, account=user)
+    await antibot.require_pow(user, solution)
+    result = await join(user)
+    await metrics.incr("joined")
+    return result
+
+
 @router.get("/position")
-async def position(user: str):
+async def position(request: Request, user: str):
+    await antibot.throttle(request)
     return await position_of(user)
 
 
