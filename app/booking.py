@@ -80,3 +80,12 @@ async def stats():
         total = await s.scalar(select(func.count()).select_from(Sale))
         distinct = await s.scalar(select(func.count(func.distinct(Sale.seat_id))))
     return {"sales": total, "distinct_seats": distinct, "oversold": total - distinct}
+
+
+async def seat_states() -> str:
+    """One char per seat: 'a' available, 'h' held, 's' sold. Sold seats keep a persistent key (see confirm)."""
+    keys = [holds.seat_key(EVENT_ID, i) for i in range(TOTAL_SEATS)]
+    values = await holds.redis.mget(keys)
+    async with Session() as s:
+        sold = set((await s.scalars(select(Sale.seat_id).where(Sale.event_id == EVENT_ID))).all())
+    return "".join("s" if i in sold else ("h" if v is not None else "a") for i, v in enumerate(values))

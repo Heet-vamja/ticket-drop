@@ -11,7 +11,7 @@ import time
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from .config import ADMIT_BATCH, ADMIT_INTERVAL_SECONDS, ENTRY_WINDOW_SECONDS
+from .config import ADMIT_INTERVAL_SECONDS, ENTRY_WINDOW_SECONDS, GATE
 from .holds import redis
 
 router = APIRouter(prefix="/queue")
@@ -35,15 +35,18 @@ async def open_queue():
 async def position_of(user: str) -> dict:
     rank = await redis.zrank(QUEUE, user)
     if rank is None:
+        token = await redis.get(f"admit:{user}")
+        if token:
+            return {"status": "admitted", "user": user, "token": token}
         raise HTTPException(404, "not in queue")
-    position = rank + 1
-    rate = ADMIT_BATCH / ADMIT_INTERVAL_SECONDS  # users admitted per second
+    rate = GATE["batch"] / ADMIT_INTERVAL_SECONDS  # users admitted per second (live, adaptive)
     return {
+        "status": "queued",
         "user": user,
-        "position": position,
+        "position": rank + 1,
         "ahead": rank,
         "total": await redis.zcard(QUEUE),
-        "eta_seconds": round(rank / rate),
+        "eta_seconds": round(rank / rate) if rate else None,
     }
 
 
@@ -75,6 +78,8 @@ async def events(user: str):
                 yield "event: gone\ndata: {}\n\n"
                 return
             yield f"data: {json.dumps(data)}\n\n"
+            if data["status"] == "admitted":
+                return
             await asyncio.sleep(2 + random.random())  # jitter so connections don't pulse in sync
 
     return StreamingResponse(stream(), media_type="text/event-stream")
